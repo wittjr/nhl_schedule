@@ -1,0 +1,5 @@
+*.csv
+*.ics
+sequence*.txt
+sample_game.json
+.DS_Store
