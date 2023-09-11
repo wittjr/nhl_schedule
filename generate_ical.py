@@ -83,10 +83,10 @@ for gameList in games:
         game_type = 'Regular Season' if game['gameType']== 'R' else ('Preseason' if game['gameType']== 'PR' else game['gameType'])
 
         event = Event()
-        event['uid'] = game['gamePk']
-        event['summary'] = 'Preseason: ' if game['gameType']=='PR' else ''
-        event['summary'] += f'{teamInfo["teamName"]} vs {game["teams"]["away"]["team"]["name"]}'
-        event['summary'] += f' - {promotion}' if promotion != '' else ''
+        event['UID'] = game['gamePk']
+        event['SUMMARY'] = 'Preseason: ' if game['gameType']=='PR' else ''
+        event['SUMMARY'] += f'{teamInfo["teamName"]} vs {game["teams"]["away"]["team"]["name"]}'
+        event['SUMMARY'] += f' - {promotion}' if promotion != '' else ''
         if game['venue']['name'] not in locations:
             if (game['venue']['link'].endswith('/null')):
                 locations[game['venue']['name']] = game['venue']['name']
@@ -94,12 +94,13 @@ for gameList in games:
                 res = requests.get(f'https://statsapi.web.nhl.com/{game["venue"]["link"]}')
                 venue = res.json()['venues'][0]
                 locations[venue['name']] = venue['name']
-        event['description'] = promotion
-        event['location'] = locations[game['venue']['name']]
-        event['dtstamp'] = now
-        event['sequence'] = calendarSequnce
-        event.add('dtstart', start)
-        event.add('dtend', start + gameLength)
+        event['DESCRIPTION'] = promotion
+        event['LOCATION'] = locations[game['venue']['name']]
+        event['DTSTAMP'] = now
+        event['LAST-MODIFIED'] = now
+        event['SEQUENCE'] = calendarSequnce
+        event.add('DTSTART', start)
+        event.add('DTEND', start + gameLength)
         cal.add_component(event)
 
         game_data.append(f"{sortable_date},\"{pretty_date}\",{weekday},{pretty_time},{game['venue']['name']},{game_type},{promotion},{game['teams']['away']['team']['name']},\n")
