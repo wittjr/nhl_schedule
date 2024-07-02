@@ -13,25 +13,28 @@ currentYear = datetime.now().year
 scheduleYear = str(currentYear) + str(currentYear+1)
 
 teamName = sys.argv[1] if (len(sys.argv) > 1) else 'Hurricanes'
+outputType = sys.argv[2] if (len(sys.argv) > 2) else 'console'
+year = sys.argv[3] if (len(sys.argv) > 3) else scheduleYear
 
-res = requests.get('https://statsapi.web.nhl.com/api/v1/teams')
-teams = res.json()['teams']
+res = requests.get(f'https://api.nhle.com/stats/rest/en/team')
+teamsData = res.json()['data']
 teamInfo = {}
-for team in teams:
-    if team['name'].endswith(teamName):
+teams = {}
+for team in teamsData:
+    teams[team['triCode']] = team
+    if team['fullName'].endswith(teamName):
         teamInfo = team
-        break
 
 if len(teamInfo.keys()) == 0:
     print('No team found, verify the name specified')
     sys.exit(1)
 
-res = requests.get(f'https://statsapi.web.nhl.com/api/v1/schedule?site=en_nhl&teamId={teamInfo["id"]}&season={scheduleYear}&gameType=PR,R')
-games = res.json()['dates']
+res = requests.get(f'https://api-web.nhle.com/v1/club-schedule-season/{teamInfo["triCode"]}/{year}')
+games = res.json()['games']
 
 # If available add promotion nights to the schedule
 promotions = {}
-promotionsFileName = f'{directory}/promotions-{teamInfo["teamName"]}-{scheduleYear}.txt'
+promotionsFileName = f'{directory}/promotions-{teamInfo["triCode"]}-{year}.txt'
 if os.path.exists(promotionsFileName):
     f = open(promotionsFileName)
     lines = f.readlines()
@@ -49,53 +52,60 @@ if os.path.exists(locationsFileName):
         [name, address] = line.strip().split(':')
         locations[name] = address
 
-
-# Calendar sequence
-calendarSequnce = 0
-calendarSequnceFileName = f'{directory}/sequence-{teamInfo["teamName"]}-{scheduleYear}.txt'
-if os.path.exists(calendarSequnceFileName):
-    f = open(calendarSequnceFileName)
-    calendarSequnce = int(f.read().splitlines()[0].strip())
-    f.close()
-    calendarSequnce += 1
-f = open(calendarSequnceFileName, "w")
-f.write(str(calendarSequnce))
-f.close()
-
-
-cal = Calendar()
-cal['X-WR-CALNAME'] = f'{teamInfo["name"]} Home Schedule'
-cal['X-WR-RELCALID'] = f'{teamInfo["name"].replace(" ", "-")}-{scheduleYear}-Home-Schedule'.lower()
-cal['METHOD'] = 'PUBLISH'
-
 game_data = []
-for gameList in games:
-    game = gameList['games'][0]
-    if game['teams']['home']['team']['id'] == teamInfo['id']:
-        start = datetime.fromisoformat(game['gameDate'][:-1])
+for game in games:
+    if game['homeTeam']['id'] == teamInfo['id']:
+        start = datetime.fromisoformat(game['startTimeUTC'][:-1])
         start = start.replace(tzinfo=tz.gettz('UTC'))
-        start = start.astimezone(tz.gettz(teamInfo['venue']['timeZone']['tz']))
+        start = start.astimezone(tz.gettz(game['venueTimezone']))
         sortable_date = start.strftime('%Y-%m-%d')
         pretty_date = start.strftime('%B %-d, %Y')
         weekday = start.strftime('%A')
         pretty_time = start.strftime('%I:%M %p')
         promotion = '' if sortable_date not in promotions.keys() else promotions[sortable_date]
-        game_type = 'Regular Season' if game['gameType']== 'R' else ('Preseason' if game['gameType']== 'PR' else game['gameType'])
+        # game_type = 'Regular Season' if game['gameType']== 2 else ('Preseason' if game['gameType']== 1 else ('Playoff' if game['gameType'] == 3 else game['gameType']))
+        game['gameType'] = 'Regular Season' if game['gameType']== 2 else ('Preseason' if game['gameType']== 1 else ('Playoff' if game['gameType'] == 3 else game['gameType']))
 
+        game_data.append(f"{sortable_date},\"{pretty_date}\",{weekday},{pretty_time},{game['venue']['default']},{game['gameType']},{promotion},{teams[game['awayTeam']['abbrev']]['fullName']},\n")
+
+if outputType == 'console':
+    for game in game_data:
+        print(game.strip())
+
+if outputType == 'calendar':
+    # Calendar sequence
+    calendarSequnce = 0
+    calendarSequnceFileName = f'{directory}/sequence-{teamInfo["triCode"]}-{scheduleYear}.txt'
+    if os.path.exists(calendarSequnceFileName):
+        f = open(calendarSequnceFileName)
+        calendarSequnce = int(f.read().splitlines()[0].strip())
+        f.close()
+        calendarSequnce += 1
+    f = open(calendarSequnceFileName, "w")
+    f.write(str(calendarSequnce))
+    f.close()
+
+
+    cal = Calendar()
+    cal['X-WR-CALNAME'] = f'{teamInfo["fullName"]} Home Schedule'
+    cal['X-WR-RELCALID'] = f'{teamInfo["fullName"].replace(" ", "-")}-{scheduleYear}-Home-Schedule'.lower()
+    cal['METHOD'] = 'PUBLISH'
+
+    for gameList in game_data:
         event = Event()
-        event['UID'] = game['gamePk']
-        event['SUMMARY'] = 'Preseason: ' if game['gameType']=='PR' else ''
-        event['SUMMARY'] += f'{teamInfo["teamName"]} vs {game["teams"]["away"]["team"]["name"]}'
+        event['UID'] = game['id']
+        event['SUMMARY'] = 'Preseason: ' if game['gameType']=='Preseason' else ''
+        event['SUMMARY'] += f'{teamInfo["fullName"]} vs {teams[game['awayTeam']['abbrev']]['fullName']}'
         event['SUMMARY'] += f' - {promotion}' if promotion != '' else ''
-        if game['venue']['name'] not in locations:
-            if (game['venue']['link'].endswith('/null')):
-                locations[game['venue']['name']] = game['venue']['name']
-            else:
-                res = requests.get(f'https://statsapi.web.nhl.com/{game["venue"]["link"]}')
-                venue = res.json()['venues'][0]
-                locations[venue['name']] = venue['name']
+        # if game['venue']['default'] not in locations:
+        #     if (game['venue']['link'].endswith('/null')):
+        #         locations[game['venue']['name']] = game['venue']['name']
+        #     else:
+        #         res = requests.get(f'https://statsapi.web.nhl.com/{game["venue"]["link"]}')
+        #         venue = res.json()['venues'][0]
+        #         locations[venue['name']] = venue['name']
         event['DESCRIPTION'] = promotion
-        event['LOCATION'] = locations[game['venue']['name']]
+        event['LOCATION'] = locations[game['venue']['default']]
         event['DTSTAMP'] = now
         event['LAST-MODIFIED'] = now
         event['SEQUENCE'] = calendarSequnce
@@ -103,16 +113,14 @@ for gameList in games:
         event.add('DTEND', start + gameLength)
         cal.add_component(event)
 
-        game_data.append(f"{sortable_date},\"{pretty_date}\",{weekday},{pretty_time},{game['venue']['name']},{game_type},{promotion},{game['teams']['away']['team']['name']},\n")
+    # Output the schedule
+    f = open(os.path.join(directory, f'{teamInfo["triCode"]}-schedule.ics'), 'wb')
+    f.write(cal.to_ical())
+    f.close()
 
-
-# Output the schedule
-f = open(os.path.join(directory, f'{teamInfo["teamName"]}-schedule.ics'), 'wb')
-f.write(cal.to_ical())
-f.close()
-
-# Output the CSV
-f = open(os.path.join(directory, f'{teamInfo["teamName"]}-games.csv'), 'w')
-f.write('Sortable Date,Date,Day,Time,Location,Type,Promotion,Opponent,Ticket Status\n')
-f.writelines(game_data)
-f.close()
+if (outputType == 'csv'):
+    # Output the CSV
+    f = open(os.path.join(directory, f'{teamInfo["triCode"]}-games.csv'), 'w')
+    f.write('Sortable Date,Date,Day,Time,Location,Type,Promotion,Opponent,Ticket Status\n')
+    f.writelines(game_data)
+    f.close()
