@@ -34,7 +34,7 @@ games = res.json()['games']
 
 # If available add promotion nights to the schedule
 promotions = {}
-promotionsFileName = f'{directory}/promotions-{teamInfo["triCode"]}-{year}.txt'
+promotionsFileName = f'{directory}/promotions-{teamInfo["triCode"]}.txt'
 if os.path.exists(promotionsFileName):
     f = open(promotionsFileName)
     lines = f.readlines()
@@ -57,20 +57,18 @@ for game in games:
     if game['homeTeam']['id'] == teamInfo['id']:
         start = datetime.fromisoformat(game['startTimeUTC'][:-1])
         start = start.replace(tzinfo=tz.gettz('UTC'))
-        start = start.astimezone(tz.gettz(game['venueTimezone']))
-        sortable_date = start.strftime('%Y-%m-%d')
-        pretty_date = start.strftime('%B %-d, %Y')
-        weekday = start.strftime('%A')
-        pretty_time = start.strftime('%I:%M %p')
-        promotion = '' if sortable_date not in promotions.keys() else promotions[sortable_date]
-        # game_type = 'Regular Season' if game['gameType']== 2 else ('Preseason' if game['gameType']== 1 else ('Playoff' if game['gameType'] == 3 else game['gameType']))
+        game['start'] = start.astimezone(tz.gettz(game['venueTimezone']))
+        game['sortable_date'] = start.strftime('%Y-%m-%d')
+        game['pretty_date'] = start.strftime('%B %-d, %Y')
+        game['weekday'] = start.strftime('%A')
+        game['pretty_time'] = start.strftime('%I:%M %p')
+        game['promotion'] = '' if game['sortable_date'] not in promotions.keys() else promotions[game['sortable_date']]
         game['gameType'] = 'Regular Season' if game['gameType']== 2 else ('Preseason' if game['gameType']== 1 else ('Playoff' if game['gameType'] == 3 else game['gameType']))
-
-        game_data.append(f"{sortable_date},\"{pretty_date}\",{weekday},{pretty_time},{game['venue']['default']},{game['gameType']},{promotion},{teams[game['awayTeam']['abbrev']]['fullName']},\n")
+        game_data.append(game)
 
 if outputType == 'console':
     for game in game_data:
-        print(game.strip())
+        print(f"{game['weekday']} {game['pretty_date']} {game['pretty_time']} vs {teams[game['awayTeam']['abbrev']]['fullName']} {game['venue']['default']} {game['gameType']} {game['promotion']}")
 
 if outputType == 'calendar':
     # Calendar sequence
@@ -91,12 +89,12 @@ if outputType == 'calendar':
     cal['X-WR-RELCALID'] = f'{teamInfo["fullName"].replace(" ", "-")}-{scheduleYear}-Home-Schedule'.lower()
     cal['METHOD'] = 'PUBLISH'
 
-    for gameList in game_data:
+    for game in game_data:
         event = Event()
         event['UID'] = game['id']
         event['SUMMARY'] = 'Preseason: ' if game['gameType']=='Preseason' else ''
         event['SUMMARY'] += f'{teamInfo["fullName"]} vs {teams[game['awayTeam']['abbrev']]['fullName']}'
-        event['SUMMARY'] += f' - {promotion}' if promotion != '' else ''
+        event['SUMMARY'] += f' - {game["promotion"]}' if game['promotion'] != '' else ''
         # if game['venue']['default'] not in locations:
         #     if (game['venue']['link'].endswith('/null')):
         #         locations[game['venue']['name']] = game['venue']['name']
@@ -104,13 +102,13 @@ if outputType == 'calendar':
         #         res = requests.get(f'https://statsapi.web.nhl.com/{game["venue"]["link"]}')
         #         venue = res.json()['venues'][0]
         #         locations[venue['name']] = venue['name']
-        event['DESCRIPTION'] = promotion
+        event['DESCRIPTION'] = game['promotion']
         event['LOCATION'] = locations[game['venue']['default']]
         event['DTSTAMP'] = now
         event['LAST-MODIFIED'] = now
         event['SEQUENCE'] = calendarSequnce
-        event.add('DTSTART', start)
-        event.add('DTEND', start + gameLength)
+        event.add('DTSTART', game['start'])
+        event.add('DTEND', game['start'] + gameLength)
         cal.add_component(event)
 
     # Output the schedule
@@ -122,5 +120,6 @@ if (outputType == 'csv'):
     # Output the CSV
     f = open(os.path.join(directory, f'{teamInfo["triCode"]}-games.csv'), 'w')
     f.write('Sortable Date,Date,Day,Time,Location,Type,Promotion,Opponent,Ticket Status\n')
-    f.writelines(game_data)
+    for game in game_data:
+        f.writelines(f"{game['sortable_date']},\"{game['pretty_date']}\",{game['weekday']},{game['pretty_time']},{game['venue']['default']},{game['gameType']},{game['promotion']},{teams[game['awayTeam']['abbrev']]['fullName']},\n")
     f.close()
